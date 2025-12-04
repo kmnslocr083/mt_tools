@@ -18,10 +18,11 @@ try {
         const data = obj.data || {};
 
         let targetHourStr = "08:00:00";
-        if (typeof $argument === "string" && $argument.trim() !== "") {
-            let match = $argument.match(/(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})|(\d{1,2})/);
+        if ($argument && typeof $argument === "object" && $argument.target_hour) {
+            let val = String($argument.target_hour).trim();
+            let match = val.match(/(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})|(\d{1,2})/);
             if (match) {
-                let val = match[0];
+                val = match[0];
                 if (!val.includes(":")) val += ":00:00";
                 else if (val.split(":").length === 2) val += ":00";
                 targetHourStr = val.padStart(8, "0");
