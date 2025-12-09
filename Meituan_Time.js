@@ -87,7 +87,7 @@ try {
         const perDay = chance.perDayLimitForUser ?? 0;
         
         chance.todayPartTime = 0;
-        chance.todayAvailableTime = 1;
+        chance.todayAvailableTime = 11134;
 
         let prizeMsg = "";
         const prizeList = data.prizeInfoList || [];
