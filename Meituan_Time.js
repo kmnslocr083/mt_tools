@@ -17,35 +17,48 @@ try {
         const obj = JSON.parse($response.body);
         const data = obj.data || {};
 
-        let targetHourStr = "08:00:00";
-        if ($argument && typeof $argument === "object" && $argument.target_hour) {
-            let val = String($argument.target_hour).trim();
-            let match = val.match(/(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})|(\d{1,2})/);
-            if (match) {
-                val = match[0];
-                if (!val.includes(":")) val += ":00:00";
-                else if (val.split(":").length === 2) val += ":00";
-                targetHourStr = val.padStart(8, "0");
+        const allRounds = data.allGrabRounds || [];
+        const currentRoundCode = data.currentGrabCouponInfo?.roundCode;
+        
+        let targetTs = new Date().getTime();
+        
+        if (allRounds.length > 0) {
+            let targetRound = null;
+            
+            if (currentRoundCode) {
+                targetRound = allRounds.find(r => r.roundCode == currentRoundCode);
+            }
+            
+            if (!targetRound) {
+                targetRound = allRounds[0];
+            }
+
+            if (targetRound && targetRound.startTime) {
+                if (typeof targetRound.startTime === 'number') {
+                    targetTs = targetRound.startTime;
+                } else {
+                    let timeStr = String(targetRound.startTime).replace(/-/g, '/');
+                    if (!timeStr.includes('/') && timeStr.includes(':')) {
+                        const now = new Date();
+                        const utc8Offset = 8 * 60;
+                        const localOffset = now.getTimezoneOffset();
+                        const beijingNow = new Date(now.getTime() + (localOffset + utc8Offset) * 60 * 1000);
+                        
+                        const y = beijingNow.getFullYear();
+                        const m = String(beijingNow.getMonth() + 1).padStart(2, "0");
+                        const d = String(beijingNow.getDate()).padStart(2, "0");
+                        timeStr = `${y}/${m}/${d} ${timeStr}`;
+                    }
+                    targetTs = new Date(timeStr).getTime();
+                }
             }
         }
 
-        const now = new Date();
-        const utc8Offset = 8 * 60;
-        const localOffset = now.getTimezoneOffset();
-        const beijingNow = new Date(now.getTime() + (localOffset + utc8Offset) * 60 * 1000);
-        const y = beijingNow.getFullYear();
-        const m = String(beijingNow.getMonth() + 1).padStart(2, "0");
-        const d = String(beijingNow.getDate()).padStart(2, "0");
-        const targetDateStr = `${y}/${m}/${d} ${targetHourStr}`;
-        const targetTs = new Date(targetDateStr).getTime();
         const tsSec = Math.floor(targetTs / 1000);
-
         data.currentTime = tsSec;
         
         const coupons = data.currentGrabCouponInfo?.coupon || [];
-        const allRounds = data.allGrabRounds || [];
-        const currentRoundCode = data.currentGrabCouponInfo?.roundCode;
-
+        
         coupons.forEach(c => c.couponStartTime = tsSec);
 
         let infoList = [];
@@ -53,6 +66,7 @@ try {
             const total = c.totalStock ?? 0;
             const residue = c.residueStock ?? 0;
             if (total === 0 && residue === 0) return;
+            
             if ([4, 8].includes(c.status)) {
                 c.status = 2; 
                 if (c.status === 4 && !c.residueStock) c.residueStock = c.totalStock || 1;
@@ -70,12 +84,18 @@ try {
             if (roundInfo?.startTime) roundStartStr = roundInfo.startTime;
         }
 
-        let subTitle = `穿越至: ${targetHourStr}`;
+        const targetDateObj = new Date(targetTs);
+        const h = String(targetDateObj.getHours()).padStart(2, "0");
+        const min = String(targetDateObj.getMinutes()).padStart(2, "0");
+        const s = String(targetDateObj.getSeconds()).padStart(2, "0");
+        const displayTime = `${h}:${min}:${s}`;
+
+        let subTitle = `穿越至: ${displayTime}`;
         if (roundStartStr) subTitle += ` | 场次: ${roundStartStr}`;
         
         const msgBody = infoList.length > 0 ? infoList.join("\n") : "当前场次暂无可展示券";
         tool.msg("美团查券", subTitle, msgBody);
-        tool.log(`穿越成功 -> ${targetDateStr} (ts:${tsSec})`);
+        tool.log(`穿越成功 -> ${targetTs} (ts:${tsSec})`);
 
         tool.done({ body: JSON.stringify(obj) });
     } else if (url.includes("playcenter") && url.includes("doaction")) {
@@ -87,7 +107,7 @@ try {
         const perDay = chance.perDayLimitForUser ?? 0;
         
         chance.todayPartTime = 0;
-        chance.todayAvailableTime = 11134;
+        chance.todayAvailableTime = 111;
 
         let prizeMsg = "";
         const prizeList = data.prizeInfoList || [];
