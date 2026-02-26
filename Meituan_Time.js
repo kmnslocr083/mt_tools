@@ -1,51 +1,153 @@
 const tool = {
-    log: (msg) => console.log(`[美团神券终结版] ${msg}`),
-    msg: (t, s, b) => $notification.post(t, s, b),
+    log: (msg) => console.log(`[美团抢券] ${msg}`),
+    msg: (title, sub, body) => $notification.post(title, sub, body),
     done: (obj = {}) => $done(obj)
 };
 
-if (typeof $response === "undefined" || !$response.body) tool.done();
+if (typeof $response === "undefined" || !$response.body) {
+    tool.done();
+}
 
-let body = $response.body;
-let url = $request.url;
+const url = $request.url;
+const secKillPath = "/api/rights/activity/secKill/info";
+const doActionPath = "/playcenter/common/v1/doaction";
+
+function timeStrToTs(timeStr) {
+    const now = new Date();
+    const utc8Offset = 8 * 60;
+    const localOffset = now.getTimezoneOffset();
+    const beijingNow = new Date(now.getTime() + (localOffset + utc8Offset) * 60 * 1000);
+    const y = beijingNow.getFullYear();
+    const m = String(beijingNow.getMonth() + 1).padStart(2, "0");
+    const d = String(beijingNow.getDate()).padStart(2, "0");
+    return new Date(`${y}/${m}/${d} ${timeStr}`).getTime();
+}
 
 try {
-    let obj = JSON.parse(body);
-    
-    let data = obj.data || {};
-    let srvTime = data.currentTime || Math.floor(Date.now() / 1000);
-    function hackCoupons(node) {
-        if (!node || typeof node !== 'object') return;
+    if (url.includes(secKillPath)) {
+        const obj = JSON.parse($response.body);
+        const data = obj.data || {};
 
-        if (node.couponId || node.rightCode || node.couponName) {
-            node.status = 2;
-            node.couponStatus = 1;
-            node.couponStartTime = srvTime - 1;
-            node.residueStock = node.totalStock || 4000;
-            if (node.stockStatus !== undefined) node.stockStatus = 1;
+        const allRounds = data.allGrabRounds || [];
+        const currentRoundCode = data.currentGrabCouponInfo?.roundCode;
+
+        let targetTs = new Date().getTime();
+
+        if (allRounds.length > 0) {
+            const nowTs = (data.currentTime || Math.floor(Date.now() / 1000)) * 1000;
+
+            let targetRound = null;
+
+            if (currentRoundCode) {
+                targetRound = allRounds.find(r => r.roundCode == currentRoundCode);
+            }
+
+            if (!targetRound) {
+                targetRound = allRounds.find(r => {
+                    if (!r.startTime || !r.endTime) return false;
+                    const start = timeStrToTs(String(r.startTime));
+                    const end = timeStrToTs(String(r.endTime));
+                    return nowTs >= start && nowTs <= end;
+                });
+            }
+
+            if (!targetRound) targetRound = allRounds[0];
+
+            if (targetRound && targetRound.startTime) {
+                if (typeof targetRound.startTime === 'number') {
+                    targetTs = targetRound.startTime;
+                } else {
+                    let timeStr = String(targetRound.startTime).replace(/-/g, '/');
+                    if (!timeStr.includes('/') && timeStr.includes(':')) {
+                        targetTs = timeStrToTs(timeStr);
+                    } else {
+                        targetTs = new Date(timeStr).getTime();
+                    }
+                }
+            }
         }
 
-        for (let key in node) {
-            if (typeof node[key] === 'object') hackCoupons(node[key]);
+        const tsSec = Math.floor(targetTs / 1000);
+        data.currentTime = tsSec;
+
+        const coupons = data.currentGrabCouponInfo?.coupon || [];
+
+        coupons.forEach(c => {
+            c.couponStartTime = tsSec;
+
+            if ([4, 8].includes(c.status)) {
+                if (c.status === 4 && !c.residueStock) c.residueStock = c.totalStock || 1;
+                c.status = 2;
+            }
+        });
+
+        let infoList = [];
+        coupons.forEach(c => {
+            const total = c.totalStock ?? 0;
+            const residue = c.residueStock ?? 0;
+            if (total === 0 && residue === 0) return;
+
+            const name = c.couponName || "未知券";
+            const limit = c.couponAmountLimit || "-";
+            const amount = c.couponAmount || "-";
+            infoList.push(`${name}: ${limit}-${amount} [${residue}/${total}]`);
+        });
+
+        let roundStartStr = "";
+        if (currentRoundCode) {
+            const roundInfo = allRounds.find(r => r.roundCode === currentRoundCode);
+            if (roundInfo?.startTime) roundStartStr = roundInfo.startTime;
         }
-    }
 
-    hackCoupons(data);
+        const targetDateObj = new Date(targetTs);
+        const h = String(targetDateObj.getHours()).padStart(2, "0");
+        const min = String(targetDateObj.getMinutes()).padStart(2, "0");
+        const s = String(targetDateObj.getSeconds()).padStart(2, "0");
+        const displayTime = `${h}:${min}:${s}`;
 
-    if (data.currentTime) {
-        data.currentTime = srvTime + 1;
-    }
+        let subTitle = `穿越至: ${displayTime}`;
+        if (roundStartStr) subTitle += ` | 场次: ${roundStartStr}`;
 
-    if (url.includes("roundCode=undefined") && data.allGrabRounds) {
-        if (!data.currentGrabCouponInfo && data.allGrabRounds.length > 0) {
-            tool.log("检测到 roundCode 缺失，尝试自动对齐场次");
+        const msgBody = infoList.length > 0 ? infoList.join("\n") : "当前场次暂无可展示券";
+        tool.msg("美团查券", subTitle, msgBody);
+        tool.log(`穿越成功 -> ${targetTs} (ts:${tsSec})`);
+
+        tool.done({ body: JSON.stringify(obj) });
+
+    } else if (url.includes("playcenter") && url.includes("doaction")) {
+        const obj = JSON.parse($response.body);
+        const data = obj.data || {};
+        const chance = data.chanceLimit || {};
+
+        const partTime = chance.todayPartTime ?? 0;
+        const perDay = chance.perDayLimitForUser ?? 0;
+
+        chance.todayPartTime = 0;
+        chance.todayAvailableTime = 111;
+
+        let prizeMsg = "";
+        const prizeList = data.prizeInfoList || [];
+        if (prizeList.length > 0) {
+            const coupon = prizeList[0].couponInfo;
+            if (coupon) {
+                const title = coupon.couponTitle || coupon.couponName || "";
+                const val = coupon.couponValue || "";
+                const limit = coupon.priceLimit || "";
+                prizeMsg = `获得: ${title} ${limit}-${val}`;
+            }
         }
+
+        const serverMsg = obj.msg || "无消息";
+        const countInfo = `[${partTime}/${perDay}]`;
+
+        tool.msg("美团老虎鸡", `${countInfo} ${serverMsg}`, prizeMsg);
+
+        tool.done({ body: JSON.stringify(obj) });
+
+    } else {
+        tool.done({});
     }
-
-    tool.log(`成功处理数据。模拟服务器时间: ${data.currentTime}`);
-    tool.done({ body: JSON.stringify(obj) });
-
 } catch (e) {
-    tool.log(`解析失败! 可能原因: Body 不完整或格式变动。错误信息: ${e}`);
+    tool.log(`脚本执行异常: ${e}`);
     tool.done({});
 }
