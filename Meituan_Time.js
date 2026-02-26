@@ -4,7 +4,11 @@ const tool = {
     done: (obj = {}) => $done(obj)
 };
 
-if (typeof $response === "undefined" || !$response.body) {
+if (typeof $response === "undefined") {
+    tool.log("错误：未获取到 $response");
+    tool.done();
+} else if (!$response.body) {
+    tool.log("错误：Body 为空，状态码: " + $response.status);
     tool.done();
 }
 
