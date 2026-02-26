@@ -16,122 +16,87 @@ try {
     if (url.includes(secKillPath)) {
         const obj = JSON.parse($response.body);
         const data = obj.data || {};
-
         const allRounds = data.allGrabRounds || [];
-        const currentRoundCode = data.currentGrabCouponInfo?.roundCode;
         
-        let targetTs = new Date().getTime();
-        
+        let currentRoundCode = data.currentGrabCouponInfo?.roundCode;
+        let serverTimeSec = data.currentTime || Math.floor(Date.now() / 1000);
+        const now = new Date(serverTimeSec * 1000);
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, "0");
+        const d = String(now.getDate()).padStart(2, "0");
+        const ymd = `${y}/${m}/${d}`;
+        const currentTimeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+
+        let targetRound = null;
         if (allRounds.length > 0) {
-            let targetRound = null;
-            
-            if (currentRoundCode) {
+            if (currentRoundCode && currentRoundCode !== "undefined") {
                 targetRound = allRounds.find(r => r.roundCode == currentRoundCode);
             }
-            
             if (!targetRound) {
-                targetRound = allRounds[0];
+                targetRound = allRounds.find(r => currentTimeStr >= r.startTime && currentTimeStr <= r.endTime) 
+                              || allRounds.find(r => r.startTime > currentTimeStr)
+                              || allRounds[0]; 
             }
+        }
 
-            if (targetRound && targetRound.startTime) {
-                if (typeof targetRound.startTime === 'number') {
-                    targetTs = targetRound.startTime;
-                } else {
-                    let timeStr = String(targetRound.startTime).replace(/-/g, '/');
-                    if (!timeStr.includes('/') && timeStr.includes(':')) {
-                        const now = new Date();
-                        const utc8Offset = 8 * 60;
-                        const localOffset = now.getTimezoneOffset();
-                        const beijingNow = new Date(now.getTime() + (localOffset + utc8Offset) * 60 * 1000);
-                        
-                        const y = beijingNow.getFullYear();
-                        const m = String(beijingNow.getMonth() + 1).padStart(2, "0");
-                        const d = String(beijingNow.getDate()).padStart(2, "0");
-                        timeStr = `${y}/${m}/${d} ${timeStr}`;
-                    }
-                    targetTs = new Date(timeStr).getTime();
-                }
-            }
+        let targetTs = serverTimeSec * 1000;
+        if (targetRound && targetRound.startTime) {
+            const fullStartStr = `${ymd} ${targetRound.startTime}`;
+            targetTs = new Date(fullStartStr).getTime();
         }
 
         const tsSec = Math.floor(targetTs / 1000);
         data.currentTime = tsSec;
         
         const coupons = data.currentGrabCouponInfo?.coupon || [];
-        
-        coupons.forEach(c => c.couponStartTime = tsSec);
+        coupons.forEach(c => {
+            c.couponStartTime = tsSec;
+            c.status = 2; 
+            if (c.residueStock === 0) c.residueStock = c.totalStock || 4000;
+        });
 
         let infoList = [];
         coupons.forEach(c => {
-            const total = c.totalStock ?? 0;
-            const residue = c.residueStock ?? 0;
-            if (total === 0 && residue === 0) return;
-            
-            if ([4, 8].includes(c.status)) {
-                c.status = 2; 
-                if (c.status === 4 && !c.residueStock) c.residueStock = c.totalStock || 1;
-            }
-
             const name = c.couponName || "未知券";
-            const limit = c.couponAmountLimit || "-";
             const amount = c.couponAmount || "-";
-            infoList.push(`${name}: ${limit}-${amount} [${residue}/${total}]`);
+            const limit = c.couponAmountLimit || "-";
+            const residue = c.residueStock ?? 0;
+            const total = c.totalStock ?? 0;
+            infoList.push(`${name}: 满${limit}减${amount} [存:${residue}/${total}]`);
         });
 
-        let roundStartStr = "";
-        if (currentRoundCode) {
-            const roundInfo = allRounds.find(r => r.roundCode === currentRoundCode);
-            if (roundInfo?.startTime) roundStartStr = roundInfo.startTime;
-        }
-
-        const targetDateObj = new Date(targetTs);
-        const h = String(targetDateObj.getHours()).padStart(2, "0");
-        const min = String(targetDateObj.getMinutes()).padStart(2, "0");
-        const s = String(targetDateObj.getSeconds()).padStart(2, "0");
-        const displayTime = `${h}:${min}:${s}`;
-
-        let subTitle = `穿越至: ${displayTime}`;
-        if (roundStartStr) subTitle += ` | 场次: ${roundStartStr}`;
+        const displayTime = new Date(targetTs).toLocaleTimeString('zh-CN', { hour12: false });
+        let subTitle = `穿越成功至: ${displayTime}`;
+        if (targetRound) subTitle += ` | 场次: ${targetRound.startTime}`;
         
-        const msgBody = infoList.length > 0 ? infoList.join("\n") : "当前场次暂无可展示券";
-        tool.msg("美团查券", subTitle, msgBody);
-        tool.log(`穿越成功 -> ${targetTs} (ts:${tsSec})`);
+        const msgBody = infoList.length > 0 ? infoList.join("\n") : "无券可展示";
+        tool.msg("美团查券助手", subTitle, msgBody);
+        tool.log(`[修正] 目标时间: ${displayTime}, 戳: ${tsSec}`);
 
         tool.done({ body: JSON.stringify(obj) });
+
     } else if (url.includes("playcenter") && url.includes("doaction")) {
         const obj = JSON.parse($response.body);
         const data = obj.data || {};
-        const chance = data.chanceLimit || {};
-
-        const partTime = chance.todayPartTime ?? 0;
-        const perDay = chance.perDayLimitForUser ?? 0;
-        
-        chance.todayPartTime = 0;
-        chance.todayAvailableTime = 111;
-
-        let prizeMsg = "";
-        const prizeList = data.prizeInfoList || [];
-        if (prizeList.length > 0) {
-            const coupon = prizeList[0].couponInfo;
-            if (coupon) {
-                const title = coupon.couponTitle || coupon.couponName || "";
-                const val = coupon.couponValue || "";
-                const limit = coupon.priceLimit || "";
-                prizeMsg = `获得: ${title} ${limit}-${val}`;
-            }
+        if (data.chanceLimit) {
+            data.chanceLimit.todayPartTime = 0;
+            data.chanceLimit.todayAvailableTime = 111;
         }
 
-        const serverMsg = obj.msg || "无消息";
-        const countInfo = `[${partTime}/${perDay}]`;
-        
-        tool.msg("美团老虎鸡", `${countInfo} ${serverMsg}`, prizeMsg);
-        
+        let prizeMsg = "点击查看详情";
+        const prizeList = data.prizeInfoList || [];
+        if (prizeList.length > 0 && prizeList[0].couponInfo) {
+            const c = prizeList[0].couponInfo;
+            prizeMsg = `获得: ${c.couponTitle || '优惠券'} 满${c.priceLimit || 0}减${c.couponValue || 0}`;
+        }
+
+        tool.msg("美团老虎机", obj.msg || "动作执行完成", prizeMsg);
         tool.done({ body: JSON.stringify(obj) });
 
     } else {
         tool.done({});
     }
 } catch (e) {
-    tool.log(`脚本执行异常: ${e}`);
+    tool.log(`脚本错误: ${e}`);
     tool.done({});
 }
