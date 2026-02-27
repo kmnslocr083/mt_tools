@@ -4,12 +4,16 @@ const tool = {
     done: (obj = {}) => $done(obj)
 };
 
+// 【修复核心 1】：遇到 OPTIONS 立即放行并阻断后续代码执行！
 if ($request.method === 'OPTIONS') {
     tool.done();
+    return; // <--- 必须加 return
 }
 
+// 【修复核心 2】：没有响应体也立即阻断！
 if (typeof $response === "undefined" || !$response.body) {
     tool.done();
+    return; // <--- 必须加 return
 }
 
 const url = $request.url;
@@ -29,7 +33,9 @@ function timeStrToTs(timeStr) {
 
 try {
     if (url.includes(secKillPath)) {
-        const obj = JSON.parse($response.body);
+        // Loon 的 body 偶尔是二进制/对象，做个小容错更安全
+        let bodyStr = typeof $response.body === 'string' ? $response.body : JSON.stringify($response.body);
+        const obj = JSON.parse(bodyStr);
         const data = obj.data || {};
 
         const allRounds = data.allGrabRounds || [];
@@ -39,7 +45,6 @@ try {
 
         if (allRounds.length > 0) {
             const nowTs = (data.currentTime || Math.floor(Date.now() / 1000)) * 1000;
-
             let targetRound = null;
 
             if (currentRoundCode) {
@@ -79,8 +84,14 @@ try {
         coupons.forEach(c => {
             c.couponStartTime = tsSec;
 
+            // 你的原逻辑：只有状态是 4 或 8 才会改。
+            // 建议：无论是什么状态，强制改成 2 和补充库存，胜率更高
             if ([4, 8].includes(c.status)) {
                 if (c.status === 4 && !c.residueStock) c.residueStock = c.totalStock || 1;
+                c.status = 2;
+            } else if (c.status === 0 || c.status === 2) {
+                // 如果已经是2，或者未开始(0)，也强行拉满库存，防止因为库存为0点不动
+                if (!c.residueStock) c.residueStock = c.totalStock || 4000;
                 c.status = 2;
             }
         });
@@ -118,7 +129,7 @@ try {
 
         tool.done({ body: JSON.stringify(obj) });
 
-    } else if (url.includes("playcenter") && url.includes("doaction")) {
+    } else if (url.includes(doActionPath)) {
         const obj = JSON.parse($response.body);
         const data = obj.data || {};
         const chance = data.chanceLimit || {};
