@@ -1,168 +1,83 @@
 const tool = {
-    log: (msg) => console.log(`[美团抢券] ${msg}`),
-    msg: (title, sub, body) => $notification.post(title, sub, body),
-    done: (obj = {}) => $done(obj)
+    msg: (title, sub, body) => $notification.post(title, sub, String(body)),
+    done: (obj) => $done(obj)
 };
 
-// 【修复核心 1】：遇到 OPTIONS 立即放行并阻断后续代码执行！
-if ($request.method === 'OPTIONS') {
-    tool.done();
-    return; // <--- 必须加 return
-}
-
-// 【修复核心 2】：没有响应体也立即阻断！
-if (typeof $response === "undefined" || !$response.body) {
-    tool.done();
-    return; // <--- 必须加 return
+// 1. 绝对防御：放行预检、无请求体、非 200 状态码的请求
+if ($request.method === 'OPTIONS' || !$response || !$response.body || $response.status != 200) {
+    tool.done({}); // 什么都不改，直接放行
+    return;        // 必须 return 阻断
 }
 
 const url = $request.url;
-const secKillPath = "/api/rights/activity/secKill/info";
-const doActionPath = "/playcenter/common/v1/doaction";
-
-function timeStrToTs(timeStr) {
-    const now = new Date();
-    const utc8Offset = 8 * 60;
-    const localOffset = now.getTimezoneOffset();
-    const beijingNow = new Date(now.getTime() + (localOffset + utc8Offset) * 60 * 1000);
-    const y = beijingNow.getFullYear();
-    const m = String(beijingNow.getMonth() + 1).padStart(2, "0");
-    const d = String(beijingNow.getDate()).padStart(2, "0");
-    return new Date(`${y}/${m}/${d} ${timeStr}`).getTime();
-}
 
 try {
-    if (url.includes(secKillPath)) {
-        // Loon 的 body 偶尔是二进制/对象，做个小容错更安全
-        let bodyStr = typeof $response.body === 'string' ? $response.body : JSON.stringify($response.body);
-        const obj = JSON.parse(bodyStr);
-        const data = obj.data || {};
-
-        const allRounds = data.allGrabRounds || [];
-        const currentRoundCode = data.currentGrabCouponInfo?.roundCode;
-
-        let targetTs = new Date().getTime();
-
-        if (allRounds.length > 0) {
-            const nowTs = (data.currentTime || Math.floor(Date.now() / 1000)) * 1000;
-            let targetRound = null;
-
-            if (currentRoundCode) {
-                targetRound = allRounds.find(r => r.roundCode == currentRoundCode);
-            }
-
-            if (!targetRound) {
-                targetRound = allRounds.find(r => {
-                    if (!r.startTime || !r.endTime) return false;
-                    const start = timeStrToTs(String(r.startTime));
-                    const end = timeStrToTs(String(r.endTime));
-                    return nowTs >= start && nowTs <= end;
-                });
-            }
-
-            if (!targetRound) targetRound = allRounds[0];
-
-            if (targetRound && targetRound.startTime) {
-                if (typeof targetRound.startTime === 'number') {
-                    targetTs = targetRound.startTime;
-                } else {
-                    let timeStr = String(targetRound.startTime).replace(/-/g, '/');
-                    if (!timeStr.includes('/') && timeStr.includes(':')) {
-                        targetTs = timeStrToTs(timeStr);
-                    } else {
-                        targetTs = new Date(timeStr).getTime();
-                    }
-                }
-            }
+    if (url.includes("/api/rights/activity/secKill/info")) {
+        
+        let bodyStr = $response.body;
+        // Loon 兼容：如果遇到诡异的非字符串 body，转成字符串
+        if (typeof bodyStr !== 'string') {
+            bodyStr = JSON.stringify(bodyStr);
         }
 
-        const tsSec = Math.floor(targetTs / 1000);
-        data.currentTime = tsSec;
+        let obj = JSON.parse(bodyStr);
+        let data = obj.data || {};
+        let srvTime = data.currentTime || Math.floor(Date.now() / 1000);
 
-        const coupons = data.currentGrabCouponInfo?.coupon || [];
-
-        coupons.forEach(c => {
-            c.couponStartTime = tsSec;
-
-            // 你的原逻辑：只有状态是 4 或 8 才会改。
-            // 建议：无论是什么状态，强制改成 2 和补充库存，胜率更高
-            if ([4, 8].includes(c.status)) {
-                if (c.status === 4 && !c.residueStock) c.residueStock = c.totalStock || 1;
-                c.status = 2;
-            } else if (c.status === 0 || c.status === 2) {
-                // 如果已经是2，或者未开始(0)，也强行拉满库存，防止因为库存为0点不动
-                if (!c.residueStock) c.residueStock = c.totalStock || 4000;
-                c.status = 2;
+        // 核心修改逻辑：无差别遍历，防止 JSON 路径变动导致找不到数据
+        let modifiedCount = 0;
+        function hackCoupon(node) {
+            if (!node || typeof node !== 'object') return;
+            
+            // 只要发现带有 couponId 或 rightCode 的对象，统统改掉
+            if (node.couponId || node.rightCode || node.couponName) {
+                node.status = 2; 
+                node.couponStatus = 1;
+                node.couponStartTime = srvTime - 1; 
+                node.residueStock = node.totalStock || 4000; 
+                if (node.stockStatus !== undefined) node.stockStatus = 1;
+                modifiedCount++;
             }
-        });
 
-        let infoList = [];
-        coupons.forEach(c => {
-            const total = c.totalStock ?? 0;
-            const residue = c.residueStock ?? 0;
-            if (total === 0 && residue === 0) return;
-
-            const name = c.couponName || "未知券";
-            const limit = c.couponAmountLimit || "-";
-            const amount = c.couponAmount || "-";
-            infoList.push(`${name}: ${limit}-${amount} [${residue}/${total}]`);
-        });
-
-        let roundStartStr = "";
-        if (currentRoundCode) {
-            const roundInfo = allRounds.find(r => r.roundCode === currentRoundCode);
-            if (roundInfo?.startTime) roundStartStr = roundInfo.startTime;
+            Object.keys(node).forEach(key => {
+                if (typeof node[key] === 'object') hackCoupon(node[key]);
+            });
         }
 
-        const targetDateObj = new Date(targetTs);
-        const h = String(targetDateObj.getHours()).padStart(2, "0");
-        const min = String(targetDateObj.getMinutes()).padStart(2, "0");
-        const s = String(targetDateObj.getSeconds()).padStart(2, "0");
-        const displayTime = `${h}:${min}:${s}`;
+        hackCoupon(data);
 
-        let subTitle = `穿越至: ${displayTime}`;
-        if (roundStartStr) subTitle += ` | 场次: ${roundStartStr}`;
+        // 时间漫游
+        if (data.currentTime) {
+            data.currentTime = srvTime + 1;
+        }
 
-        const msgBody = infoList.length > 0 ? infoList.join("\n") : "当前场次暂无可展示券";
-        tool.msg("美团查券", subTitle, msgBody);
-        tool.log(`穿越成功 -> ${targetTs} (ts:${tsSec})`);
-
+        // 成功时弹窗提示（如果你嫌烦，以后可以注释掉这行）
+        tool.msg("✅ 美团查券成功", `成功修改了 ${modifiedCount} 张券`, "按钮应已点亮");
+        
+        // 返回修改后的 Body
         tool.done({ body: JSON.stringify(obj) });
+        return; // 结束
 
-    } else if (url.includes(doActionPath)) {
-        const obj = JSON.parse($response.body);
-        const data = obj.data || {};
-        const chance = data.chanceLimit || {};
-
-        const partTime = chance.todayPartTime ?? 0;
-        const perDay = chance.perDayLimitForUser ?? 0;
-
-        chance.todayPartTime = 0;
-        chance.todayAvailableTime = 111;
-
-        let prizeMsg = "";
-        const prizeList = data.prizeInfoList || [];
-        if (prizeList.length > 0) {
-            const coupon = prizeList[0].couponInfo;
-            if (coupon) {
-                const title = coupon.couponTitle || coupon.couponName || "";
-                const val = coupon.couponValue || "";
-                const limit = coupon.priceLimit || "";
-                prizeMsg = `获得: ${title} ${limit}-${val}`;
-            }
+    } else if (url.includes("/playcenter/common/v1/doaction")) {
+        // 老虎机逻辑... (略作精简，防止主干卡死)
+        let obj = JSON.parse($response.body);
+        if (obj.data && obj.data.chanceLimit) {
+            obj.data.chanceLimit.todayPartTime = 0;
+            obj.data.chanceLimit.todayAvailableTime = 111;
         }
-
-        const serverMsg = obj.msg || "无消息";
-        const countInfo = `[${partTime}/${perDay}]`;
-
-        tool.msg("美团老虎鸡", `${countInfo} ${serverMsg}`, prizeMsg);
-
         tool.done({ body: JSON.stringify(obj) });
-
+        return;
     } else {
         tool.done({});
+        return;
     }
+
 } catch (e) {
-    tool.log(`脚本执行异常: ${e}`);
-    tool.done({});
+    // 🚨 终极防挂起与报错机制！
+    // 1. 把报错信息直接弹到屏幕上
+    tool.msg("❌ 美团脚本崩溃", "错误信息:", e.message || e);
+    
+    // 2. 最关键的一步：即使报错，也要把【原始的 body】原封不动还给 Loon！
+    // 这样前端只会显示原版页面，绝对不会发生 Pending 或白屏卡死！
+    tool.done({ body: $response.body });
 }
