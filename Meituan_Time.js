@@ -4,6 +4,10 @@ const tool = {
     done: (obj = {}) => $done(obj)
 };
 
+if ($request.method === 'OPTIONS') {
+    tool.done();
+}
+
 if (typeof $response === "undefined" || !$response.body) {
     tool.done();
 }
