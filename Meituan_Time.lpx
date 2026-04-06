@@ -3,6 +3,7 @@
 [Script]
 http-response ^https?:\/\/rights-apigw\.meituan\.com\/api\/rights\/activity\/secKill\/info script-path=https://raw.githubusercontent.com/kmnslocr083/mt_tools/refs/heads/main/Meituan_Time.js, requires-body=true, tag=美团查券
 http-response ^https?:\/\/promotion\.waimai\.meituan\.com\/playcenter\/common\/v1\/doaction script-path=https://raw.githubusercontent.com/kmnslocr083/mt_tools/refs/heads/main/Meituan_Time.js, requires-body=true, tag=美团老虎鸡
+http-response ^https?:\/\/market\.waimai\.meituan\.com\/gundam\/.*\/index\.html script-path=https://raw.githubusercontent.com/kmnslocr083/mt_tools/refs/heads/main/Meituan_Time.js, requires-body=true, tag=美团活动链接
 
 [MITM]
-hostname = rights-apigw.meituan.com, promotion.waimai.meituan.com
+hostname = rights-apigw.meituan.com, promotion.waimai.meituan.com, market.waimai.meituan.com
