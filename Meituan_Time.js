@@ -17,56 +17,13 @@ try {
         const obj = JSON.parse($response.body);
         const data = obj.data || {};
 
-        const allRounds = data.allGrabRounds || [];
-        const currentRoundCode = data.currentGrabCouponInfo?.roundCode;
-        
-        let targetTs = new Date().getTime();
-        
-        if (allRounds.length > 0) {
-            let targetRound = null;
-            
-            if (currentRoundCode) {
-                targetRound = allRounds.find(r => r.roundCode == currentRoundCode);
-            }
-            
-            if (!targetRound) {
-                targetRound = allRounds[0];
-            }
-
-            if (targetRound && targetRound.startTime) {
-                if (typeof targetRound.startTime === 'number') {
-                    targetTs = targetRound.startTime;
-                } else {
-                    let timeStr = String(targetRound.startTime).replace(/-/g, '/');
-                    if (!timeStr.includes('/') && timeStr.includes(':')) {
-                        const now = new Date();
-                        const utc8Offset = 8 * 60;
-                        const localOffset = now.getTimezoneOffset();
-                        const beijingNow = new Date(now.getTime() + (localOffset + utc8Offset) * 60 * 1000);
-                        
-                        const y = beijingNow.getFullYear();
-                        const m = String(beijingNow.getMonth() + 1).padStart(2, "0");
-                        const d = String(beijingNow.getDate()).padStart(2, "0");
-                        timeStr = `${y}/${m}/${d} ${timeStr}`;
-                    }
-                    targetTs = new Date(timeStr).getTime();
-                }
-            }
-        }
-
-        const tsSec = Math.floor(targetTs / 1000);
-        data.currentTime = tsSec;
-        
         const coupons = data.currentGrabCouponInfo?.coupon || [];
-        
-        coupons.forEach(c => c.couponStartTime = tsSec);
-
         let infoList = [];
+
         coupons.forEach(c => {
             const total = c.totalStock ?? 0;
             const residue = c.residueStock ?? 0;
             if (total === 0 && residue === 0) return;
-            
             if ([4, 8].includes(c.status)) {
                 c.status = 2; 
                 if (c.status === 4 && !c.residueStock) c.residueStock = c.totalStock || 1;
@@ -78,27 +35,12 @@ try {
             infoList.push(`${name}: ${limit}-${amount} [${residue}/${total}]`);
         });
 
-        let roundStartStr = "";
-        if (currentRoundCode) {
-            const roundInfo = allRounds.find(r => r.roundCode === currentRoundCode);
-            if (roundInfo?.startTime) roundStartStr = roundInfo.startTime;
-        }
-
-        const targetDateObj = new Date(targetTs);
-        const h = String(targetDateObj.getHours()).padStart(2, "0");
-        const min = String(targetDateObj.getMinutes()).padStart(2, "0");
-        const s = String(targetDateObj.getSeconds()).padStart(2, "0");
-        const displayTime = `${h}:${min}:${s}`;
-
-        let subTitle = `穿越至: ${displayTime}`;
-        if (roundStartStr) subTitle += ` | 场次: ${roundStartStr}`;
-        
         const msgBody = infoList.length > 0 ? infoList.join("\n") : "当前场次暂无可展示券";
-        tool.msg("美团查券", subTitle, msgBody);
-        tool.log(`穿越成功 -> ${targetTs} (ts:${tsSec})`);
+        tool.msg("美团查券", "券状态解析成功", msgBody);
 
         tool.done({ body: JSON.stringify(obj) });
-    } else if (url.includes("playcenter") && url.includes("doaction")) {
+
+    } else if (url.includes(doActionPath)) {
         const obj = JSON.parse($response.body);
         const data = obj.data || {};
         const chance = data.chanceLimit || {};
@@ -128,6 +70,13 @@ try {
         
         tool.done({ body: JSON.stringify(obj) });
 
+    } else if (url.includes("market.waimai.meituan.com/gundam/") && url.includes("/index.html")) {
+        const baseUrl = url.split("?")[0];
+        
+        tool.log(`活动链接: ${baseUrl}`);
+        tool.msg("美团活动链接", "成功", baseUrl);
+        
+        tool.done({});
     } else {
         tool.done({});
     }
