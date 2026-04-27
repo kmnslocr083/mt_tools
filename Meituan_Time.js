@@ -1,11 +1,18 @@
 const tool = {
     log: (msg) => console.log(`[美团抢券] ${msg}`),
-    msg: (title, sub, body) => $notification.post(title, sub, body),
+    msg: (title, sub, body) => {
+        if (typeof $notification !== "undefined") {
+            $notification.post(title, sub, body);
+        } else if (typeof $notify !== "undefined") {
+            $notify(title, sub, body);
+        }
+    },
     done: (obj = {}) => $done(obj)
 };
 
 if (typeof $response === "undefined" || !$response.body) {
     tool.done();
+    return;
 }
 
 const url = $request.url;
@@ -24,9 +31,13 @@ try {
             const total = c.totalStock ?? 0;
             const residue = c.residueStock ?? 0;
             if (total === 0 && residue === 0) return;
+            
+            // 劫持修改抢券状态
             if ([4, 8].includes(c.status)) {
                 c.status = 2; 
-                if (c.status === 4 && !c.residueStock) c.residueStock = c.totalStock || 1;
+                if (c.status === 4 && !c.residueStock) {
+                    c.residueStock = c.totalStock || 1;
+                }
             }
 
             const name = c.couponName || "未知券";
@@ -82,5 +93,6 @@ try {
     }
 } catch (e) {
     tool.log(`脚本执行异常: ${e}`);
+    // 即使出错，也保证将原始请求放行，不影响日常使用
     tool.done({});
 }
