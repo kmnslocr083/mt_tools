@@ -59,9 +59,6 @@ try {
         const partTime = chance.todayPartTime ?? 0;
         const perDay = chance.perDayLimitForUser ?? 0;
         
-        chance.todayPartTime = 0;
-        chance.todayAvailableTime = 111;
-
         let prizeMsg = "";
         const prizeList = data.prizeInfoList || [];
         if (prizeList.length > 0) {
