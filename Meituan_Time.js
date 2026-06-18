@@ -77,7 +77,7 @@ try {
         
         tool.done({ body: JSON.stringify(obj) });
 
-    } else if (url.includes("market.waimai.meituan.com/gundam/") || (url.includes("market.waimai.meituan.com/gd2/wm") && url.includes("/index.html"))) {
+    } else if (url.includes("market.waimai.meituan.com/gundam/") || url.includes("market.waimai.meituan.com/gd2/wm")) {
         const baseUrl = url.split("?")[0];
         
         tool.log(`活动链接: ${baseUrl}`);
