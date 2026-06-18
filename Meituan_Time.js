@@ -32,7 +32,6 @@ try {
             const residue = c.residueStock ?? 0;
             if (total === 0 && residue === 0) return;
             
-            // 劫持修改抢券状态
             if ([4, 8].includes(c.status)) {
                 c.status = 2; 
                 if (c.status === 4 && !c.residueStock) {
@@ -78,7 +77,7 @@ try {
         
         tool.done({ body: JSON.stringify(obj) });
 
-    } else if (url.includes("market.waimai.meituan.com/gundam/") && url.includes("/index.html")) {
+    } else if (url.includes("market.waimai.meituan.com/gundam/") || (url.includes("market.waimai.meituan.com/gd2/wm") && url.includes("/index.html"))) {
         const baseUrl = url.split("?")[0];
         
         tool.log(`活动链接: ${baseUrl}`);
@@ -90,6 +89,5 @@ try {
     }
 } catch (e) {
     tool.log(`脚本执行异常: ${e}`);
-    // 即使出错，也保证将原始请求放行，不影响日常使用
     tool.done({});
 }
